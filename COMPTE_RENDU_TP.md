@@ -229,8 +229,9 @@ CREATE TABLE crypto_events (
 ### Démarrage
 
 ```powershell
-# 1. Ouvrir le projet
-cd C:\Users\LENOVO\Desktop\EST_K\BD\TP2_crypto
+# 1. Cloner ou ouvrir le projet
+git clone https://github.com/BozIAymane/crypto-realtime-analytics.git
+cd crypto-realtime-analytics
 
 # 2. Configurer l'environnement
 copy .env.example .env

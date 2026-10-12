@@ -105,7 +105,8 @@ curl https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=1
 ### 1. Cloner ou ouvrir le projet
 
 ```powershell
-cd C:\Users\LENOVO\Desktop\EST_K\BD\TP2_crypto
+git clone https://github.com/BozIAymane/crypto-realtime-analytics.git
+cd crypto-realtime-analytics
 ```
 
 ### 2. Configurer l'environnement
