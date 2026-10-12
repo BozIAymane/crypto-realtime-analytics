@@ -1,0 +1,172 @@
+# ================================================================
+# docker-compose.yml - Crypto Real-Time Analytics - TP Big Data
+# ================================================================
+# Services : Kafka, PostgreSQL, ML Training, Producer, Spark, Grafana
+# ================================================================
+
+services:
+
+  # ── Kafka (KRaft mode, sans Zookeeper) ─────────────
+  kafka:
+    image: apache/kafka:3.7.0
+    container_name: crypto-kafka
+    ports:
+      - "9092:9092"
+      - "9094:9094"
+    environment:
+      # KRaft mode
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      # Listeners
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:9094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      # Topic auto-creation
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 2
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+      # Performance TP
+      KAFKA_LOG_RETENTION_HOURS: 24
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      # Cluster ID
+      CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
+    volumes:
+      - kafka-data:/tmp/kraft-combined-logs
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 30s
+    networks:
+      - crypto-net
+
+  # ── PostgreSQL ─────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: crypto-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-crypto_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-crypto_pass_2024}
+      POSTGRES_DB: ${POSTGRES_DB:-crypto_analytics}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-crypto_user} -d ${POSTGRES_DB:-crypto_analytics}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    networks:
+      - crypto-net
+
+  # ── Entraînement du modèle ML ──────────────────────
+  train-model:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: crypto-train-model
+    command: ["python", "train_model.py"]
+    environment:
+      MODEL_DIR: /app/models
+      BINANCE_BASE_URL: ${BINANCE_BASE_URL:-https://api.binance.com}
+      SYMBOLS: ${SYMBOLS:-BTCUSDT,ETHUSDT}
+    volumes:
+      - ml-models:/app/models
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - crypto-net
+
+  # ── Producteur Kafka ───────────────────────────────
+  producer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: crypto-producer
+    command: ["python", "producer.py"]
+    environment:
+      KAFKA_BROKER: kafka:9092
+      KAFKA_TOPIC: ${KAFKA_TOPIC:-crypto-market}
+      BINANCE_BASE_URL: ${BINANCE_BASE_URL:-https://api.binance.com}
+      SYMBOLS: ${SYMBOLS:-BTCUSDT,ETHUSDT}
+      FETCH_INTERVAL_SECONDS: ${FETCH_INTERVAL_SECONDS:-5}
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: on-failure
+    networks:
+      - crypto-net
+
+  # ── Spark Structured Streaming ─────────────────────
+  spark-stream:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: crypto-spark
+    command: >
+      python spark_stream.py
+    environment:
+      KAFKA_BROKER: kafka:9092
+      KAFKA_TOPIC: ${KAFKA_TOPIC:-crypto-market}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB:-crypto_analytics}
+      POSTGRES_USER: ${POSTGRES_USER:-crypto_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-crypto_pass_2024}
+      MODEL_DIR: /app/models
+      SPARK_CHECKPOINT_DIR: /app/checkpoints
+    volumes:
+      - ml-models:/app/models:ro
+      - spark-checkpoints:/app/checkpoints
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      train-model:
+        condition: service_completed_successfully
+    restart: on-failure
+    networks:
+      - crypto-net
+
+  # ── Grafana ────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: crypto-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GF_SECURITY_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD:-admin123}
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/crypto-dashboard.json
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - crypto-net
+
+# ── Volumes ──────────────────────────────────────────
+volumes:
+  kafka-data:
+  pgdata:
+  ml-models:
+  spark-checkpoints:
+  grafana-data:
+
+# ── Réseau ───────────────────────────────────────────
+networks:
+  crypto-net:
+    driver: bridge

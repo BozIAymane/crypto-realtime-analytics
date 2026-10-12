@@ -1,0 +1,21 @@
+# Grafana Datasource Provisioning - PostgreSQL
+apiVersion: 1
+
+datasources:
+  - name: PostgreSQL
+    type: postgres
+    access: proxy
+    url: postgres:5432
+    database: crypto_analytics
+    user: crypto_user
+    isDefault: true
+    jsonData:
+      sslmode: disable
+      maxOpenConns: 10
+      maxIdleConns: 5
+      connMaxLifetime: 14400
+      postgresVersion: 1600
+      timescaledb: false
+    secureJsonData:
+      password: crypto_pass_2024
+    editable: true

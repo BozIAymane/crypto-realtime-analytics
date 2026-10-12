@@ -1,0 +1,12 @@
+.git
+.gitignore
+__pycache__
+*.py[cod]
+.env
+pgdata/
+kafka-data/
+checkpoints/
+.idea/
+.vscode/
+*.md
+tests/
